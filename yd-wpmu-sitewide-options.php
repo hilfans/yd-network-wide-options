@@ -3,7 +3,7 @@
  * Plugin Name:       YD Network-wide Options
  * Plugin URI:        https://www.yann.com/en/wp-plugins/yd-wpmu-sitewide-options
  * Description:       Makes selected plugin settings network-wide. Changes to a setting on your main site can be automatically replicated to all multisite blogs. Centralized management of your plugin options.
- * Version:           5.1.0
+ * Version:           5.1.1
  * Author:            Yann Dubois
  * Author URI:        https://www.yann.com/
  * Text Domain:       yd-wpmu-sitewide-options
@@ -18,7 +18,7 @@
 /**
  * @package YD_Network_Wide_Options
  * @author Yann Dubois
- * @version 5.1.0
+ * @version 5.1.1
  */
 
 /**
@@ -46,7 +46,7 @@ final class YD_Network_Wide_Options {
 	 *
 	 * @var string
 	 */
-	private $version = '5.1.0';
+	private $version = '5.1.1';
 
 	/**
 	 * The single instance of the class.
@@ -83,7 +83,8 @@ final class YD_Network_Wide_Options {
 	private function __construct() {
 		$this->define_constants();
 		$this->hooks();
-		$this->options = get_network_option( 'yd_network_wide_options', $this->get_default_options() );
+		// FIX: Correctly call get_network_option with null for the current network ID.
+		$this->options = get_network_option( null, 'yd_network_wide_options', $this->get_default_options() );
 	}
 
 	/**
@@ -148,7 +149,8 @@ final class YD_Network_Wide_Options {
 	 * Check for old options and migrate them to the new system.
 	 */
 	public function maybe_migrate_options() {
-		$old_options = get_network_option( 'widget_yd_wpmuso' );
+		// FIX: Correctly call get_network_option with null for the current network ID and a default value.
+		$old_options = get_network_option( null, 'widget_yd_wpmuso', false );
 		if ( false === $old_options ) {
 			return;
 		}
@@ -156,7 +158,8 @@ final class YD_Network_Wide_Options {
 		// Old options found, let's migrate.
 		$old_settings = isset( $old_options[0] ) && is_array( $old_options[0] ) ? $old_options[0] : [];
 		if ( empty( $old_settings ) ) {
-			delete_network_option( 'widget_yd_wpmuso' );
+			// FIX: Correctly call delete_network_option with null for the current network ID.
+			delete_network_option( null, 'widget_yd_wpmuso' );
 			return;
 		}
 
@@ -200,9 +203,11 @@ final class YD_Network_Wide_Options {
 				}
 			}
 		}
-
-		update_network_option( 'yd_network_wide_options', $new_options );
-		delete_network_option( 'widget_yd_wpmuso' );
+		
+		// FIX: Correctly call update_network_option with null for the current network ID.
+		update_network_option( null, 'yd_network_wide_options', $new_options );
+		// FIX: Correctly call delete_network_option with null for the current network ID.
+		delete_network_option( null, 'widget_yd_wpmuso' );
 
 		// Redirect to the settings page with an "updated" message
 		wp_safe_redirect( add_query_arg( 'updated', 'migrated', network_admin_url( 'settings.php?page=yd-network-wide-options' ) ) );
