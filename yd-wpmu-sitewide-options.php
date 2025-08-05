@@ -1,1104 +1,803 @@
 <?php
 /**
- * @package YD_WPMU-Sitewide-Options
+ * Plugin Name:       YD Network-wide Options
+ * Plugin URI:        https://www.yann.com/en/wp-plugins/yd-wpmu-sitewide-options
+ * Description:       Makes selected plugin settings network-wide. Changes to a setting on your main site can be automatically replicated to all multisite blogs. Centralized management of your plugin options.
+ * Version:           5.1.0
+ * Author:            Yann Dubois
+ * Author URI:        https://www.yann.com/
+ * Text Domain:       yd-wpmu-sitewide-options
+ * Domain Path:       /languages
+ * Network:           true
+ * Requires at least: 6.8
+ * Requires PHP:      8.3
+ * Requires MySQL:    8.0
+ * Requires MariaDB:  10.6
+ */
+
+/**
+ * @package YD_Network_Wide_Options
  * @author Yann Dubois
- * @version 4.0.1
- */
-
-/*
- Plugin Name: YD Network-wide options
- Plugin URI: http://www.yann.com/en/wp-plugins/yd-wpmu-sitewide-options
- Description: Makes selected plugin settings network-wide. Change to a setting of your main blog can now be automatically replicated to all multisite blogs. Centralized management of your plugin options.
- Author: Yann Dubois
- Version: 4.0.1
- Author URI: http://www.yann.com/
+ * @version 5.1.0
  */
 
 /**
- * @copyright 2010  Yann Dubois  ( email : yann _at_ abc.fr )
+ * @copyright 2010-2025 Yann Dubois ( email : yann _at_ abc.fr )
  *
- *  Original development of this plugin was kindly funded by http://www.pressonline.com
- *  Additional developments were kindly funded by Matt @ http://bossinternetmarketing.com
- *  Dutch translation kindly provided by: Rene @ http://fethiyehotels.com
- *  German translation kindly provided by: Rian @ http://www.pangaea.nl/diensten/exact-webshop
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- */
-/**
- Revision 0.1.0:
- - Original beta release
- Revision 0.1.1:
- - Optional debug code
- Revision 0.2.0:
- - Bugfix: memory leak when replicating to a large number of blogs
- - Bugfix: possible unwanted recursion when updating an option
- - Improved settings page design
- - Debug messages for diagnosing memory problems
- - Dutch version
- Revision 1.0.0:
- - Bugfix: A single child blog should be enough
- - Bugfix: Blogs should not have to be public/immature/... to allow replication (TODO: -> make this into options?)
- - New feature: Autospreading settings change is now an option (enable/disable update action hook)
- - New feature: Auto-apply default options when new blog is created
- - New feature: Can disable overwriting of existing options when updating from the settings page
- Revision 1.1.0
- - Bugfix: Auto-apply default options when new blog is created (funded by Matt Hardy @ bbgqt.org)
- - New feature: default options are displayed in the settings page
- - German version
- Revision 1.1.1
- - Bugfix: unserialize (thanks, Andrew)
- - Added missing credits
- Revision 3.0
- - Wordpress 3.0 compatibility
- - Admin panel W3C compatibility issues
- - Minor bug fixes
- - Documentation upgraded to match WP 3.0 vocabulary
- - Upgraded French version
- - Upgraded funding credits
- - Name changed from YD WPMU Sitewide Options to YD Network-wide options
- - Widget settings buttons renamed to plugin settings (there is no widget)
- Revision 3.0.1
- - Minor text fixes
- Revision 4.0.0
- - Checked overwrite option (http://www.yann.com/en/wp-plugins/yd-wpmu-sitewide-options#comment-6983)
- - Fixed bug in autospread(ing) option
- - Fixed debug_backtrace / PHP4 warning
- - Switched form submission to POST method
- - Added option for flushing URL rewrite rules on sub blogs (thanks to XPD)
- - Added option to choose "master" blog for replication features
- - Added optional blog filtering options
- - Added option to ignore specific blogs
- - Added feature to replicate custom database tables used by some plugins
- - Tested WP3.0.3 compatibility, updated doc
- Revision 4.0.1
- - Bugfix in table structure and data replication
- 
- TODO:
- Rename plugin option key from widget_yd_wpmuso tp plugin_yd_wpmuso / register_option()
- There would be another way of performing this:
- Instead of physically "spreading" the option data on all the sub-blogs,
- we could hook into the get_option call to make it always take the main blog's option setting.
- An option could even be to choose which blog serves as the "master". (right now it is the first blog)
- This could possibly be a choice for each option: spread or centralize.
- Other possible evolutions: 
- - select which blogs to spread to
- - set the auto-spread / overwrite / centralize option individually for each blog / option
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
-/** Install or reset plugin defaults **/
-function yd_wpmuso_reset( $force ) {
-	/** Init values **/
-	$yd_wpmuso_version		= "4.0.0";
-	$newoption				= 'widget_yd_wpmuso';
-	$newvalue				= array();
-	$prev_options = get_option( $newoption );
-	if( ( isset( $force ) && $force ) || !isset( $prev_options['plugin_version'] ) ) {
-		// those default options are set-up at plugin first-install or manual reset only
-		// they will not be changed when the plugin is just upgraded or deactivated/reactivated
-		$newvalue['plugin_version'] 	= $yd_wpmuso_version;
-		$newvalue[] = array(
-		  'debug'=>0,
-		  'selected_options'=>0,
-		  'disable_backlink'=>0,
-		  'autospreading'=>1,
-		  'auto_new_blog'=>1,
-		  'over_write'=>1,
-		  'flush_rewrites'=>0,
-		  'master_blog_id'=>1,
-		  'only_public'=>0,
-		  'skip_archived'=>0,
-		  'skip_mature'=>0,
-		  'skip_spam'=>0,
-		  'skip_deleted'=>0,
-		  'to_skip'=>'',
-		  'overwrite_data'=>0
+if ( ! defined( 'ABSPATH' ) ) {
+	exit; // Exit if accessed directly.
+}
+
+final class YD_Network_Wide_Options {
+
+	/**
+	 * Plugin version.
+	 *
+	 * @var string
+	 */
+	private $version = '5.1.0';
+
+	/**
+	 * The single instance of the class.
+	 *
+	 * @var YD_Network_Wide_Options
+	 */
+	private static $_instance = null;
+
+	/**
+	 * Plugin options.
+	 *
+	 * @var array
+	 */
+	private $options = [];
+
+	/**
+	 * Main YD_Network_Wide_Options Instance.
+	 *
+	 * Ensures only one instance of YD_Network_Wide_Options is loaded or can be loaded.
+	 *
+	 * @static
+	 * @return YD_Network_Wide_Options - Main instance.
+	 */
+	public static function instance() {
+		if ( is_null( self::$_instance ) ) {
+			self::$_instance = new self();
+		}
+		return self::$_instance;
+	}
+
+	/**
+	 * Constructor.
+	 */
+	private function __construct() {
+		$this->define_constants();
+		$this->hooks();
+		$this->options = get_network_option( 'yd_network_wide_options', $this->get_default_options() );
+	}
+
+	/**
+	 * Define Constants.
+	 */
+	private function define_constants() {
+		define( 'YD_NWO_PLUGIN_FILE', __FILE__ );
+		define( 'YD_NWO_VERSION', $this->version );
+	}
+
+	/**
+	 * Hook into actions and filters.
+	 */
+	private function hooks() {
+		add_action( 'init', [ $this, 'load_textdomain' ] );
+		add_action( 'network_admin_menu', [ $this, 'add_network_admin_menu' ] );
+		add_action( 'admin_init', [ $this, 'register_and_build_fields' ] );
+		add_action( 'admin_init', [ $this, 'maybe_migrate_options' ] );
+
+		// Core functionality hooks
+		add_action( 'wpmu_new_blog', [ $this, 'on_new_blog_creation' ], 10, 1 );
+		add_action( 'plugins_loaded', [ $this, 'add_option_update_hooks' ] );
+		add_action( 'wp_footer', [ $this, 'display_footer_link' ] );
+		add_filter( 'plugin_row_meta', [ $this, 'plugin_row_meta' ], 10, 2 );
+	}
+
+	/**
+	 * Load plugin textdomain.
+	 */
+	public function load_textdomain() {
+		load_plugin_textdomain( 'yd-wpmu-sitewide-options', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
+	}
+
+	/**
+	 * Get default options.
+	 *
+	 * @return array
+	 */
+	private function get_default_options() {
+		return [
+			'plugin_version'   => $this->version,
+			'selected_options' => [],
+			'selected_tables'  => [],
+			'replicate_data'   => 0,
+			'disable_backlink' => 0,
+			'autospreading'    => 1,
+			'auto_new_blog'    => 1,
+			'overwrite_options' => 1,
+			'overwrite_data'   => 0,
+			'flush_rewrites'   => 0,
+			'master_blog_id'   => 1,
+			'only_public'      => 0,
+			'skip_archived'    => 1,
+			'skip_mature'      => 1,
+			'skip_spam'        => 1,
+			'skip_deleted'     => 1,
+			'to_skip'          => '',
+		];
+	}
+
+	/**
+	 * Check for old options and migrate them to the new system.
+	 */
+	public function maybe_migrate_options() {
+		$old_options = get_network_option( 'widget_yd_wpmuso' );
+		if ( false === $old_options ) {
+			return;
+		}
+
+		// Old options found, let's migrate.
+		$old_settings = isset( $old_options[0] ) && is_array( $old_options[0] ) ? $old_options[0] : [];
+		if ( empty( $old_settings ) ) {
+			delete_network_option( 'widget_yd_wpmuso' );
+			return;
+		}
+
+		$new_options = $this->get_default_options();
+		$new_options['plugin_version'] = $this->version;
+
+		// Map old settings to new settings
+		$map = [
+			'disable_backlink' => 'disable_backlink',
+			'autospreading'    => 'autospreading',
+			'auto_new_blog'    => 'auto_new_blog',
+			'over_write'       => 'overwrite_options',
+			'overwrite_data'   => 'overwrite_data',
+			'flush_rewrites'   => 'flush_rewrites',
+			'master_blog_id'   => 'master_blog_id',
+			'only_public'      => 'only_public',
+			'skip_archived'    => 'skip_archived',
+			'skip_mature'      => 'skip_mature',
+			'skip_spam'        => 'skip_spam',
+			'skip_deleted'     => 'skip_deleted',
+			'to_skip'          => 'to_skip',
+		];
+
+		foreach ( $map as $old_key => $new_key ) {
+			if ( isset( $old_settings[ $old_key ] ) ) {
+				$new_options[ $new_key ] = $old_settings[ $old_key ];
+			}
+		}
+
+		// Separate options and tables from the old 'selected_options'
+		if ( ! empty( $old_settings['selected_options'] ) && is_array( $old_settings['selected_options'] ) ) {
+			foreach ( $old_settings['selected_options'] as $selected ) {
+				if ( strpos( $selected, 'ydtable_' ) === 0 ) {
+					$table_name = str_replace( 'ydtable_', '', $selected );
+					$new_options['selected_tables'][] = $table_name;
+				} elseif ( strpos( $selected, 'yddata_' ) === 0 ) {
+					// This indicates data replication for a table, which is now a separate option.
+					$new_options['replicate_data'] = 1;
+				} else {
+					$new_options['selected_options'][] = $selected;
+				}
+			}
+		}
+
+		update_network_option( 'yd_network_wide_options', $new_options );
+		delete_network_option( 'widget_yd_wpmuso' );
+
+		// Redirect to the settings page with an "updated" message
+		wp_safe_redirect( add_query_arg( 'updated', 'migrated', network_admin_url( 'settings.php?page=yd-network-wide-options' ) ) );
+		exit;
+	}
+
+	/**
+	 * Add the options page to the network admin menu.
+	 */
+	public function add_network_admin_menu() {
+		add_submenu_page(
+			'settings.php',
+			__( 'YD Network-wide Options', 'yd-wpmu-sitewide-options' ),
+			__( 'Network-wide Options', 'yd-wpmu-sitewide-options' ),
+			'manage_network_options',
+			'yd-network-wide-options',
+			[ $this, 'create_admin_page' ]
 		);
-//		$newvalue[0]['debug'] 			= 0;
-//		$newvalue[0]['selected_options']= 0;
-//		$newvalue[0]['disable_backlink']= 0;
-//		$newvalue[0]['autospreading']	= 1;
-//		$newvalue[0]['auto_new_blog']	= 1;
-//		$newvalue[0]['over_write']		= 1;
-//		$newvalue[0]['flush_rewrites']	= 0;
-//		$newvalue[0]['master_blog_id']	= 1;
-//		$newvalue[0]['only_public']		= 0; 
-//    	$newvalue[0]['skip_archived']	= 0; 
-//    	$newvalue[0]['skip_mature']		= 0; 
-//    	$newvalue[0]['skip_spam']		= 0; 
-//    	$newvalue[0]['skip_deleted']	= 0; 
-//		$newvalue[0]['to_skip']			= '';
-//		$newvalue[0]['overwrite_data']	= 0;
-		if( $prev_options ) {
-			update_option( $newoption, $newvalue );
-		} else {
-			add_option( $newoption, $newvalue );
+	}
+
+	/**
+	 * Register settings, sections, and fields.
+	 */
+	public function register_and_build_fields() {
+		register_setting(
+			'yd_nwo_options', // Option group
+			'yd_network_wide_options', // Option name
+			[ $this, 'sanitize_options' ] // Sanitize callback
+		);
+
+		// Options Section
+		add_settings_section(
+			'yd_nwo_options_section',
+			__( 'Options to Propagate', 'yd-wpmu-sitewide-options' ),
+			'__return_false',
+			'yd_nwo_options'
+		);
+
+		add_settings_field(
+			'selected_options',
+			__( 'Replicate these options:', 'yd-wpmu-sitewide-options' ),
+			[ $this, 'render_options_field' ],
+			'yd_nwo_options',
+			'yd_nwo_options_section'
+		);
+
+		// Tables Section
+		add_settings_section(
+			'yd_nwo_tables_section',
+			__( 'Database Tables to Propagate', 'yd-wpmu-sitewide-options' ),
+			'__return_false',
+			'yd_nwo_options'
+		);
+
+		add_settings_field(
+			'selected_tables',
+			__( 'Replicate these tables:', 'yd-wpmu-sitewide-options' ),
+			[ $this, 'render_tables_field' ],
+			'yd_nwo_options',
+			'yd_nwo_tables_section'
+		);
+
+		// Global Settings Section
+		add_settings_section(
+			'yd_nwo_global_section',
+			__( 'Global Settings', 'yd-wpmu-sitewide-options' ),
+			'__return_false',
+			'yd_nwo_options'
+		);
+
+		$global_fields = [
+			'master_blog_id'    => __( 'Master Site ID', 'yd-wpmu-sitewide-options' ),
+			'autospreading'     => __( 'Auto-apply future changes', 'yd-wpmu-sitewide-options' ),
+			'auto_new_blog'     => __( 'Apply to new sites', 'yd-wpmu-sitewide-options' ),
+			'overwrite_options' => __( 'Overwrite existing options on subsites', 'yd-wpmu-sitewide-options' ),
+			'replicate_data'    => __( 'Replicate table data (not just structure)', 'yd-wpmu-sitewide-options' ),
+			'overwrite_data'    => __( 'Overwrite existing data in tables', 'yd-wpmu-sitewide-options' ),
+			'flush_rewrites'    => __( 'Flush rewrite rules on new sites', 'yd-wpmu-sitewide-options' ),
+		];
+
+		foreach ( $global_fields as $id => $title ) {
+			add_settings_field(
+				$id,
+				$title,
+				[ $this, 'render_global_field' ],
+				'yd_nwo_options',
+				'yd_nwo_global_section',
+				[ 'id' => $id ]
+			);
 		}
-	}
-}
-register_activation_hook(__FILE__, 'yd_wpmuso_reset');
-
-/** Create Text Domain For Translations **/
-add_action('init', 'yd_wpmuso_textdomain');
-function yd_wpmuso_textdomain() {
-	$plugin_dir = basename( dirname(__FILE__) );
-	load_plugin_textdomain(
-		'yd-wpmuso',
-		PLUGINDIR . '/' . dirname( plugin_basename( __FILE__ ) ),
-		dirname( plugin_basename( __FILE__ ) )
-	); 
-}
-
-/** Create custom admin menu page **/
-add_action('admin_menu', 'yd_wpmuso_menu');
-function yd_wpmuso_menu() {
-	add_options_page(
-		__('YD Network-wide Options','yd-wpmuso'), 
-		__('YD Network-wide Options','yd-wpmuso'),
-		'manage_options',
-		__FILE__,
-		'yd_wpmuso_options'
-	);
-}
-function yd_wpmuso_options() {
-	global $wpdb;
-	$support_url	= 'http://www.yann.com/en/wp-plugins/yd-wpmu-sitewide-options';
-	$yd_logo		= 'http://www.yann.com/yd-wpmuso-v400-logo.gif';
-	$jstext			= preg_replace( "/'/", "\\'", __( 'This will disable the link in your blog footer. ' .
-							'If you are using this plugin on your site and like it, ' .
-							'did you consider making a donation?' .
-							' - Thanks.', 'yd-wpmuso' ) );
-	$d = false;
-	if( $_POST['debug'] == 1 ) $d = true;
-	?>
-	<script type="text/javascript">
-	<!--
-	function donatemsg() {
-		alert( '<?php echo $jstext ?>' );
-	}
-	//-->
-	</script>
-	<?php
-	echo '<div class="wrap">';
-	
-	// ---
-	// options/settings page header section: h2 title + warnings / updates
-	// ---
-
-	echo '<h2>' . __('YD Network-wide Options', 'yd-wpmuso') . '</h2>';
-	
-	if( isset( $_POST["do"] ) ) {
-		echo '<div class="updated">';
-		if($d) echo '<p>' . __('Action:', 'yd-wpmuso') . ' '
-		. __( 'I should now', 'yd-wpmuso' ) . ' ' . __( $_POST["do"], 'yd-wpmuso' ) . '.</p>';
-		if(			$_POST["do"] == __('Reset plugin settings', 'yd-wpmuso') ) {
-			yd_wpmuso_reset( 'force' );
-			echo '<p>' . __('Plugin settings are reset', 'yd-wpmuso') . '</p>';
-		} elseif(	$_POST["do"] == __('Update plugin settings', 'yd-wpmuso') ) {
-			yd_wpmuso_update_options();
-			echo '<p>' . __('Plugin settings are updated', 'yd-wpmuso') . '</p>';
-		}
-		echo '</div>'; // / updated
-	} else {
-		echo '<div class="updated">';
-		echo '<p>'
-		. '<a href="' . $support_url . '" target="_blank" title="Plugin FAQ">';
-		echo __('Welcome to YD Network-wide Options Admin Page.', 'yd-wpmuso')
-		. '</a></p>';
-		echo '</div>'; // / updated
-	}
-	$options = get_option( 'widget_yd_wpmuso' );
-	$i = 0;
-	if( !isset( $options[$i]["master_blog_id"] ) ) $options[$i]["master_blog_id"] = 1;
-	$master_blog_id = $options[$i]["master_blog_id"];
-	if( ! is_array( $options ) ) {
-		// Something went wrong
-		echo '<div class="updated">'; //TODO: Replace with appropriate error / warning class (red/pink)
-		echo __( 'Uh-oh. Looks like I lost my settings. Sorry.', 'yd-wpmuso' );
-		echo '<form method="post" style="display:inline;" action="">';
-		echo '<input type="submit" name="do" value="' . __( 'Reset plugin settings', 'yd-wpmuso' ) . '" /><br/>';
-		echo '<input type="hidden" name="page" value="' . $_POST["page"] . '" />';
-		echo '</form>';
-		echo '</div>'; // / updated
-		return false;
-	}
-	
-	// ---
-	// Right sidebar
-	// ---
-	
-	echo '<div class="metabox-holder has-right-sidebar">';
-	echo '<div class="inner-sidebar">';
-	echo '<div class="meta-box-sortabless ui-sortable">';
-
-	// == Block 1 ==
-
-	echo '<div class="postbox">';
-	echo '<h3 class="hndle">' . __( 'Considered donating?', 'yd-wpmuso' ) . '</h3>';
-	echo '<div class="inside" style="text-align:center;"><br/>';
-	echo '<a href="' . $support_url . '" target="_blank" title="Plugin FAQ">'
-	. '<img src="' . $yd_logo . '" alt="YD logo" /></a>'
-	. '<br/><small>' . __( 'Enjoy this plugin?', 'yd-wpmuso' ) . '<br/>' . __( 'Help me improve it!', 'yd-wpmuso' ) . '</small><br/>'
-	. '<form action="https://www.paypal.com/cgi-bin/webscr" method="post">'
-	. '<input type="hidden" name="cmd" value="_s-xclick"/>'
-	. '<input type="hidden" name="encrypted" value="-----BEGIN PKCS7-----MIIHVwYJKoZIhvcNAQcEoIIHSDCCB0QCAQExggEwMIIBLAIBADCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwDQYJKoZIhvcNAQEBBQAEgYCiFu1tpCIeoyBfil/lr6CugOlcO4p0OxjhjLE89RKKt13AD7A2ORce3I1NbNqN3TO6R2dA9HDmMm0Dcej/x/0gnBFrf7TFX0Z0SPDi6kxqQSi5JJxCFnMhsuuiya9AMr7cnqalW5TKAJXeWSewY9jpai6CZZSmaVD9ixHg9TZF7DELMAkGBSsOAwIaBQAwgdQGCSqGSIb3DQEHATAUBggqhkiG9w0DBwQIwARMEv03M3uAgbA/2qbrsW1k/ZvCMbqOR+hxDB9EyWiwa9LuxfTw2Z1wLa7c/+fUlvRa4QpPXZJUZbx8q1Fm/doVWaBshwHjz88YJX8a2UyM+53cCKB0jRpFyAB79PikaSZ0uLEWcXoUkuhZijNj40jXK2xHyFEj0S0QLvca7/9t6sZkNPVgTJsyCSuWhD7j2r0SCFcdR5U+wlxbJpjaqcpf47MbvfdhFXGW5G5vyAEHPgTHHtjytXQS4KCCA4cwggODMIIC7KADAgECAgEAMA0GCSqGSIb3DQEBBQUAMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbTAeFw0wNDAyMTMxMDEzMTVaFw0zNTAyMTMxMDEzMTVaMIGOMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWluIFZpZXcxFDASBgNVBAoTC1BheVBhbCBJbmMuMRMwEQYDVQQLFApsaXZlX2NlcnRzMREwDwYDVQQDFAhsaXZlX2FwaTEcMBoGCSqGSIb3DQEJARYNcmVAcGF5cGFsLmNvbTCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEAwUdO3fxEzEtcnI7ZKZL412XvZPugoni7i7D7prCe0AtaHTc97CYgm7NsAtJyxNLixmhLV8pyIEaiHXWAh8fPKW+R017+EmXrr9EaquPmsVvTywAAE1PMNOKqo2kl4Gxiz9zZqIajOm1fZGWcGS0f5JQ2kBqNbvbg2/Za+GJ/qwUCAwEAAaOB7jCB6zAdBgNVHQ4EFgQUlp98u8ZvF71ZP1LXChvsENZklGswgbsGA1UdIwSBszCBsIAUlp98u8ZvF71ZP1LXChvsENZklGuhgZSkgZEwgY4xCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLUGF5UGFsIEluYy4xEzARBgNVBAsUCmxpdmVfY2VydHMxETAPBgNVBAMUCGxpdmVfYXBpMRwwGgYJKoZIhvcNAQkBFg1yZUBwYXlwYWwuY29tggEAMAwGA1UdEwQFMAMBAf8wDQYJKoZIhvcNAQEFBQADgYEAgV86VpqAWuXvX6Oro4qJ1tYVIT5DgWpE692Ag422H7yRIr/9j/iKG4Thia/Oflx4TdL+IFJBAyPK9v6zZNZtBgPBynXb048hsP16l2vi0k5Q2JKiPDsEfBhGI+HnxLXEaUWAcVfCsQFvd2A1sxRr67ip5y2wwBelUecP3AjJ+YcxggGaMIIBlgIBATCBlDCBjjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtQYXlQYWwgSW5jLjETMBEGA1UECxQKbGl2ZV9jZXJ0czERMA8GA1UEAxQIbGl2ZV9hcGkxHDAaBgkqhkiG9w0BCQEWDXJlQHBheXBhbC5jb20CAQAwCQYFKw4DAhoFAKBdMBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTEwMDQyMzE3MzQyMlowIwYJKoZIhvcNAQkEMRYEFKrTO31hqFJU2+u3IDE3DLXaT5GdMA0GCSqGSIb3DQEBAQUABIGAgnM8hWICFo4H1L5bE44ut1d1ui2S3ttFZXb8jscVGVlLTasQNVhQo3Nc70Vih76VYBBca49JTbB1thlzbdWQpnqKKCbTuPejkMurUjnNTmrhd1+F5Od7o/GmNrNzMCcX6eM6x93TcEQj5LB/fMnDRxwTLWgq6OtknXBawy9tPOk=-----END PKCS7-----'
-	. '" />'
-	. '<input type="image" src="https://www.paypal.com/' . __( 'en_US', 'yd-wpmuso' ) . '/i/btn/btn_donateCC_LG.gif" name="submit" alt="PayPal - The safer, easier way to pay online!" />'
-	. '<img alt="" border="0" src="https://www.paypal.com/' . __( 'en_US', 'yd-wpmuso' ) . '/i/scr/pixel.gif" width="1" height="1" />'
-	. '</form>'
-	. '<small><strong>' . __( 'Thanks', 'yd-wpmuso' ) . ' - Yann.</strong></small><br/><br/>';
-	
-	echo '</div>'; // / inside
-	echo '</div>'; // / postbox
-	
-	// == Block 2 ==
-	
-	echo '<div class="postbox">';
-	echo '<h3 class="hndle">' . __( 'Credits', 'yd-wpmuso' ) . '</h3>';
-	echo '<div class="inside" style="padding:10px;">';
-	echo 'v.' . $options['plugin_version'] . '<br/>';
-	echo __( 'Running on PHP v.', 'yd-wpmuso' ) . PHP_VERSION . '<br/>';
-	echo '<b>' . __( 'Funding', 'yd-wpmuso' ) . '</b>';
-	echo '<ul>';
-	echo '<li>' . __( 'Initial:', 'yd-wpmuso' ) . ' <a href="http://www.wellcom.fr">Wellcom</a></li>';
-	echo '<li>' . __( 'Additional:', 'yd-wpmuso' ) . '  <a href="http://bossinternetmarketing.com/">Bossinternetmarketing</a></li>';
-	echo '<li>' . __( 'Additional:', 'yd-wpmuso' ) . '  <a href="http://www.eurospreed.com/">Eurospreed</a></li>';
-	echo '</ul>';
-	echo '<b>' . __( 'Translations', 'yd-wpmuso' ) . '</b>';
-	echo '<ul>';
-	echo '<li>' . __( 'English:', 'yd-wpmuso' ) . ' <a href="http://www.yann.com">Yann</a></li>';
-	echo '<li>' . __( 'French:', 'yd-wpmuso' ) . ' <a href="http://www.yann.com">Yann</a></li>';
-	echo '<li>' . __( 'Dutch:', 'yd-wpmuso' ) . ' <a href="http://www.fethiyehotels.com">Rene</a></li>';
-	echo '<li>' . __( 'German:', 'yd-wpmuso' ) . ' <a href="http://www.pangaea.nl/diensten/exact-webshop">Rian</a></li>';
-	echo '</ul>';
-	echo __( 'If you want to contribute to a translation of this plugin, please drop me a line by ', 'yd-wpmuso' );
-	echo '<a href="mailto:yann@abc.fr">' . __('e-mail', 'yd-wpmuso' ) . '</a> ';
-	echo __( 'or leave a comment on the ', 'yd-wpmuso' );
-	echo '<a href="' . $support_url . '">' . __( 'plugin\'s page', 'yd-wpmuso' ) . '</a>. ';
-	echo __( 'You will get credit for your translation in the plugin file and the documentation page, ', 'yd-wpmuso' );
-	echo __( 'as well as a link on this page and on my developers\' blog.', 'yd-wpmuso' );
 		
-	echo '</div>'; // / inside
-	echo '</div>'; // / postbox
-	
-	// == Block 3 ==
-	
-	echo '<div class="postbox">';
-	echo '<h3 class="hndle">' . __( 'Support' ) . '</h3>';
-	echo '<div class="inside" style="padding:10px;">';
-	echo '<b>' . __( 'Free support', 'yd-wpmuso' ) . '</b>';
-	echo '<ul>';
-	echo '<li>' . __( 'Support page:', 'yd-wpmuso' );
-	echo ' <a href="' . $support_url . '">' . __( 'here.', 'yd-wpmuso' ) . '</a>';
-	echo ' ' . __( '(use comments!)', 'yd-wpmuso' ) . '</li>';
-	echo '</ul>';
-	echo '<p><b>' . __( 'Professional consulting', 'yd-wpmuso' ) . '</b><br/>';
-	echo __( 'I am available as an experienced free-lance Wordpress plugin developer and web consultant. ', 'yd-wpmuso' );
-	echo __( 'Please feel free to <a href="mailto:yann@abc.fr">check with me</a> for any adaptation or specific implementation of this plugin. ', 'yd-wpmuso' );
-	echo __( 'Or for any WP-related custom development or consulting work. Hourly rates available.', 'yd-wpmuso' ) . '</p>';
-	echo '</div>'; // / inside
-	echo '</div>'; // / postbox
-	
-	echo '</div>'; // / meta-box-sortabless ui-sortable
-	echo '</div>'; // / inner-sidebar
-
-	// ---
-	// Main content area
-	// ---
-	
-	echo '<div class="has-sidebar sm-padded">';
-	echo '<div id="post-body-content" class="has-sidebar-content">';
-	echo '<div class="meta-box-sortabless">';
-
-	//---
-	echo '<form method="post" style="display:inline;" action="">';
-	//---
-	
-	$optionslist = yd_wpmuso_get_optionslist();
-	$tableslist = yd_wpmuso_get_tableslist();
+		// Blog Filtering Section
+		add_settings_section(
+			'yd_nwo_filtering_section',
+			__( 'Site Filtering', 'yd-wpmu-sitewide-options' ),
+			'__return_false',
+			'yd_nwo_options'
+		);
+		
+		$filtering_fields = [
+			'only_public'   => __( 'Only public sites', 'yd-wpmu-sitewide-options' ),
+			'skip_archived' => __( 'Skip archived sites', 'yd-wpmu-sitewide-options' ),
+			'skip_mature'   => __( 'Skip mature sites', 'yd-wpmu-sitewide-options' ),
+			'skip_spam'     => __( 'Skip spam sites', 'yd-wpmu-sitewide-options' ),
+			'skip_deleted'  => __( 'Skip deleted sites', 'yd-wpmu-sitewide-options' ),
+			'to_skip'       => __( 'Site IDs to skip', 'yd-wpmu-sitewide-options' ),
+		];
+		
+		foreach ( $filtering_fields as $id => $title ) {
+			add_settings_field(
+				$id,
+				$title,
+				[ $this, 'render_global_field' ],
+				'yd_nwo_options',
+				'yd_nwo_filtering_section',
+				[ 'id' => $id ]
+			);
+		}
+	}
 	
 	/**
-	// let's try to sort some options...
-	global $new_whitelist_options;
-	if( $new_whitelist_options ) {
-		echo '<div class="postbox">';
-		echo '<h3 class="hndle">' . __( 'Registered plugin options:', 'yd-wpmuso' ) . '</h3>';
-		echo '<div class="inside">';
-		echo '<pre>' . var_dump( $new_whitelist_options ) . '</pre>';	
-		echo '<table style="margin:10px;table-layout:fixed;width:95%">';
-		echo '<tr><td valign="top" style="width:47%">' . __('Replicate these options network-wide:', 'yd-wpmuso') .
-			'</td><td style="width:3%">&nbsp;</td><td style="width:50%">' . __('Value from master blog:', 'yd-wpmuso') . '</td></tr>';
-		foreach ( (array) $new_whitelist_options as $group_name => $option_group ) {
-			echo '<tr><td colspan="3"><strong>' . __( 'Options from group:', 'yd-wpmuso' ) . ' ' . $group_name 
-				. '</strong></td></tr>';
-			foreach( (array) $option_group as $option_name ) {
-				foreach( $optionslist as $key => $option ) {
-					if( esc_attr( $option->option_name ) == $option_name ) {
-						$myoption = $option;
-						unset( $optionslist[$key] );
-					}
-				}
-				//$val = get_blog_option( 1, $opt );
-				yd_wpmuso_display_optfield( $myoption, $options, $i );
+	 * Render the settings page wrapper.
+	 */
+	public function create_admin_page() {
+		?>
+		<div class="wrap">
+			<h1><?php esc_html_e( 'YD Network-wide Options', 'yd-wpmu-sitewide-options' ); ?></h1>
+			<?php
+			if ( isset( $_GET['updated'] ) && $_GET['updated'] === 'migrated' ) {
+				echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Old plugin settings successfully migrated!', 'yd-wpmu-sitewide-options' ) . '</p></div>';
 			}
+			?>
+			<form action="edit.php?action=update_network_option" method="post">
+				<?php
+				settings_fields( 'yd_nwo_options' );
+				do_settings_sections( 'yd_nwo_options' );
+				submit_button();
+				?>
+			</form>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render the checkbox list for options.
+	 */
+	public function render_options_field() {
+		$master_blog_id = absint( $this->options['master_blog_id'] );
+		$all_options    = $this->get_replicable_options( $master_blog_id );
+
+		if ( empty( $all_options ) ) {
+			printf(
+				/* translators: %d: master site ID */
+				esc_html__( 'Could not find any options for the master site (ID: %d).', 'yd-wpmu-sitewide-options' ),
+				esc_html( $master_blog_id )
+			);
+			return;
+		}
+
+		echo '<div style="max-height: 400px; overflow-y: scroll; border: 1px solid #ccd0d4; padding: 10px; background: #fff;">';
+		echo '<table>';
+		foreach ( $all_options as $option ) {
+			$option_name  = esc_attr( $option->option_name );
+			$checked      = in_array( $option_name, $this->options['selected_options'] ) ? 'checked' : '';
+			$option_value = esc_html( wp_trim_words( maybe_serialize( $option->option_value ), 20 ) );
+			
+			echo '<tr>';
+			echo '<td style="width: 250px; padding-right: 15px;"><label><input type="checkbox" name="yd_network_wide_options[selected_options][]" value="' . $option_name . '" ' . $checked . '> ' . $option_name . '</label></td>';
+			echo '<td><small><code>' . $option_value . '</code></small></td>';
+			echo '</tr>';
 		}
 		echo '</table>';
-		echo '</div>'; // / inside
-		echo '</div>'; // / postbox
-	}
-
-	echo '<div class="postbox">';
-	echo '<h3 class="hndle">' . __( 'Widget options:', 'yd-wpmuso' ) . '</h3>';
-	echo '<div class="inside">';
-	
-	echo '</div>'; // / inside
-	echo '</div>'; // / postbox	
-	**/
-	
-	// == Available options to replicate ==
-	
-	echo '<div class="postbox">';
-	echo '<h3 class="hndle">' . __( 'Options to propagate:', 'yd-wpmuso' ) . '</h3>';
-	echo '<div class="inside">';
-	echo '<p>' . __('Master blog ID:', 'yd-wpmuso') . ' ' . $master_blog_id . '</p>';
-	echo '<table style="margin:10px;table-layout:fixed;width:95%">';
-	
-	// List of available options in the main blog
-	echo '<tr><td valign="top" style="width:47%">' . __('Replicate these options network-wide:', 'yd-wpmuso') .
-		'</td><td style="width:3%">&nbsp;</td><td style="width:50%">' . __('Value from master blog:', 'yd-wpmuso') . '</td></tr>';
-	foreach ( (array) $optionslist as $option) {
-		yd_wpmuso_display_optfield( $option, $options, $i );
-	}
-	
-	echo '</table>';
-	echo '</div>'; // / inside
-	echo '</div>'; // / postbox
-
-	// == Avaiulable DB tables to replicate ==
-	
-	echo '<div class="postbox">';
-	echo '<h3 class="hndle">' . __( 'Database tables to propagate:', 'yd-wpmuso' ) . '</h3>';
-	echo '<div class="inside">';
-	echo '<table style="margin:10px;table-layout:fixed;width:95%">';
-	
-	// List of available tables in the main blog
-	echo '<tr><td valign="top" style="width:47%">' . __('Replicate these tables network-wide:', 'yd-wpmuso') .
-		'</td><td style="width:3%">&nbsp;</td><td style="width:50%">' . __('Also replicate data:', 'yd-wpmuso') . '</td></tr>';
-	foreach ( (array) $tableslist as $table) {
-		yd_wpmuso_display_dbtable( $table, $options, $i );
-	}
-	
-	echo '</table>';
-	echo '</div>'; // / inside
-	echo '</div>'; // / postbox
-	
-	// == Other options ==
-
-	echo '<div class="postbox">';
-	echo '<h3 class="hndle">' . __( 'Global settings:', 'yd-wpmuso' ) . '</h3>';
-	echo '<div class="inside">';
-	echo '<table style="margin:10px;">';
-	
-	// over_write (options)
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-over_write-0\">" 
-			. __('Overwrite existing blog settings:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-over_write-0\" value=\"1\" id=\"yd_wpmuso-over_write-0\" ";
-	if( $options[$i]["over_write"] == 1 )
-		echo ' checked="checked" ';
-	echo ' /><em>' . __('(settings stored as option keys)', 'yd-wpmuso') . '</em></td></tr>';
-	// overwrite_data (table data)
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-overwrite_data-0\">" 
-			. __('Overwrite existing blog plugin data:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-overwrite_data-0\" value=\"1\" id=\"yd_wpmuso-overwrite_data-0\" ";
-	if( $options[$i]["overwrite_data"] == 1 )
-		echo ' checked="checked" ';
-	echo ' /><em>' . __('(settings stored in custom database tables)', 'yd-wpmuso') . '</em></td></tr>';
-	// autospreading
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-autospreading-0\">" 
-			. __('Automatically apply future changes to all blogs:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-autospreading-0\" value=\"1\" id=\"yd_wpmuso-autospreading-0\" ";
-	if( $options[$i]["autospreading"] == 1 )
-		echo ' checked="checked" ';
-	echo ' /></td></tr>';
-	// auto_new_blog
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-auto_new_blog-0\">" 
-			. __('Spread options to new blogs:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-auto_new_blog-0\" value=\"1\" id=\"yd_wpmuso-auto_new_blog-0\" ";
-	if( $options[$i]["auto_new_blog"] == 1 )
-		echo ' checked="checked" ';	
-	echo '/></td></tr>';
-	// flush_rewrites
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-flush_rewrites-0\">" 
-			. __('Flush rewrite rules on new blogs:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-flush_rewrites-0\" value=\"1\" id=\"yd_wpmuso-flush_rewrites-0\" ";
-	if( $options[$i]["flush_rewrites"] == 1 )
-		echo ' checked="checked" ';	
-	echo '/></td></tr>';
-	// master_blog_id
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-master_blog_id-0\">" 
-			. __('Master blog ID:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"text\" name=\"yd_wpmuso-master_blog_id-0\" value=\"" . $options[$i]["master_blog_id"];
-	echo "\" id=\"yd_wpmuso-master_blog_id-0\" size=\"3\" /></td></tr>";
-	
-	// public = '1' 
-	// $newvalue[0]['only_public']		= 1; 
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-only_public-0\">" 
-			. __('Only propagate to blogs marked as public:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-only_public-0\" value=\"1\" id=\"yd_wpmuso-only_public-0\" ";
-	if( $options[$i]["only_public"] == 1 )
-		echo ' checked="checked" ';	
-	echo '/></td></tr>';
-	
-    // archived = '0' 
-    // $newvalue[0]['skip_archived']	= 0; 
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-skip_archived-0\">" 
-			. __('Skip blogs marked as archived:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-skip_archived-0\" value=\"1\" id=\"yd_wpmuso-skip_archived-0\" ";
-	if( $options[$i]["skip_archived"] == 1 )
-		echo ' checked="checked" ';	
-	echo '/></td></tr>';
-			
-	// mature = '0' 
-    // $newvalue[0]['skip_mature']		= 0; 
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-skip_mature-0\">" 
-			. __('Skip blogs marked as mature:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-skip_mature-0\" value=\"1\" id=\"yd_wpmuso-skip_mature-0\" ";
-	if( $options[$i]["skip_mature"] == 1 )
-		echo ' checked="checked" ';	
-	echo '/></td></tr>';
-	
-	// spam = '0'
-	// $newvalue[0]['skip_spam']		= 0; 
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-skip_spam-0\">" 
-			. __('Skip blogs marked as spam:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-skip_spam-0\" value=\"1\" id=\"yd_wpmuso-skip_spam-0\" ";
-	if( $options[$i]["skip_spam"] == 1 )
-		echo ' checked="checked" ';	
-	echo '/></td></tr>';
-	
-    // deleted ='0' 
-	// $newvalue[0]['skip_deleted']			= 0; 
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-skip_deleted-0\">" 
-			. __('Skip blogs marked as deleted:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-skip_deleted-0\" value=\"1\" id=\"yd_wpmuso-skip_deleted-0\" ";
-	if( $options[$i]["skip_deleted"] == 1 )
-		echo ' checked="checked" ';	
-	echo '/></td></tr>';
-	
-	// skip blogs
-	// $newvalue[0]['to_skip']			= '';
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"yd_wpmuso-to_skip-0\">" 
-			. __('Skip blog IDs:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"text\" name=\"yd_wpmuso-to_skip-0\" value=\"" . $options[$i]["to_skip"];
-	echo "\" id=\"yd_wpmuso-to_skip-0\" size=\"10\" />";
-	echo '<em>' . __('(comma-separated list of blog IDs to avoid)', 'yd-wpmuso') . '</em>';
-	echo "</td></tr>";
-	
-	// Debug messages
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"debug\">" 
-			. __('Show debug messages:', 'yd-wpmuso') . "
-			</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"debug\" value=\"1\" id=\"debug\" ";
-	if( $_POST['debug'] == 1 )
-		echo ' checked="checked" ';
-	echo " /></td></tr>";
-	// Disable backlink
-	echo '<tr><th scope="row" align="right"><label for="yd_wpmuso-disable_backlink-0">' 
-			. __( 'Disable backlink in the blog footer:', 'yd-wpmuso' ) .
-		'</label></th><td><input type="checkbox" name="yd_wpmuso-disable_backlink-0" value="1" id="yd_wpmuso-disable_backlink-0" ';
-	if( $options[$i]["disable_backlink"] == 1 ) echo ' checked="checked" ';
-	echo ' onclick="donatemsg()" ';
-	echo ' /></td></tr>';
-			
-	//---
-	
-	echo '</table>';
-	
-	echo '</div>'; // / inside
-	echo '</div>'; // / postbox
-	
-	//echo '<div>';
-	echo '<p class="submit">';
-	echo '<input type="submit" name="do" value="' . __('Update plugin settings', 'yd-wpmuso') . '" />';
-	echo '<input type="hidden" name="page" value="' . $_POST["page"] . '" />';
-	echo '<input type="hidden" name="time" value="' . time() . '" />';
-	echo '<input type="submit" name="do" value="' . __('Reset plugin settings', 'yd-wpmuso') . '" />';
-	echo '</p>'; // / submit
-	echo '</form>';
-	//echo '</div>'; // /
-	
-	echo '</div>'; // / meta-box-sortabless
-	echo '</div>'; // / has-sidebar-content
-	echo '</div>'; // / has-sidebar sm-padded
-	echo '</div>'; // / metabox-holder has-right-sidebar
-	echo '</div>'; // /wrap
-}
-
-function yd_wpmuso_display_dbtable( $table, $options, $i ) {
-	//global $wpdb;
-	$table = esc_attr( $table );
-	//$stripped_table = preg_replace( '/^' . $wpdb->prefix . '/', '', $table );
-	$tbl = 'ydtable_' . $table;
-	$tbl2 = 'yddata_' . $table;
-	$tbld = $table;
-	$opt_id = 'table_' . $table;
-	$opt2_id = 'data_' . $table;
-	echo '<tr>';
-	echo '<th scope="row" align="right"><label for="' . $opt_id . '">' . $tbld . '</label></th>';
-	echo '<td><input type="checkbox" name="yd_wpmuso-selected_options-0[]" value="' . $tbl . '" id="' . $opt_id .'" ';
-	if( is_array( $options[$i]["selected_options"] ) && in_array( $tbl, $options[$i]["selected_options"] ) )
-		echo ' checked="checked" ';
-	echo ' /></td>';
-	echo '<td><input type="checkbox" name="yd_wpmuso-selected_options-0[]" value="' . $tbl2 . '" id="' . $opt2_id .'" ';
-	if( is_array( $options[$i]["selected_options"] ) && in_array( $tbl2, $options[$i]["selected_options"] ) )
-		echo ' checked="checked" ';
-	echo ' /></td>';
-	echo '</tr>';
-}
-
-function yd_wpmuso_display_optfield( $option, $options, $i ) {
-	global $ydacount;
-	$opt = esc_attr( $option->option_name );
-	$val = $option->option_value;
-	$opt_id = preg_replace( '/\s+/', '_', $opt );
-	$disabled = '';
-	echo "
-		<tr>
-			<th scope=\"row\" align=\"right\"><label for=\"$opt_id\">$opt</label></th>";
-	echo "	<td><input type=\"checkbox\" name=\"yd_wpmuso-selected_options-0[]\" value=\"$opt\" id=\"$opt_id\" ";
-	if( is_array( $options[$i]["selected_options"] ) && in_array( $opt, $options[$i]["selected_options"] ) )
-		echo ' checked="checked" ';
-	echo " /></td>";
-	if( is_string( $option->option_value ) ) $uns = unserialize( $option->option_value );
-	echo '<td>';
-	//echo substr( 0, 64, $val ); sub
-	if( $uns || is_array( $uns ) || is_object( $uns ) ) {
-		if( is_string( $uns ) && $uns2 = unserialize( $uns ) ) $uns = $uns2; //double serialized...
-		$ydacount ++;
-		echo '<div ' .
-			' onmouseover="document.getElementById(\'yda' . $ydacount . '\').style.display=\'block\';" ' .
-			' onmouseout="document.getElementById(\'yda' . $ydacount . '\').style.display=\'none\';" ' .
-			'><div ' .
-			' style="color:blue;text-decoration:underline" ' .
-			'>Serial data</div>';
-		echo '<div id="yda' . $ydacount . '" style="display:none;color:#333;text-decoration:none;background:white;"><pre style="background:white;border:2px solid #CCC;overflow:scroll;">';
-		ob_start();
-		var_dump($uns);
-		$a=ob_get_contents();
-		ob_end_clean();
-		echo htmlspecialchars($a,ENT_QUOTES);
-		echo '</pre></div>';
 		echo '</div>';
-	} elseif( is_string( $val ) ) {
-		echo '<div style="overflow:hidden;" title="' . htmlentities( $val ) . '">';
-		echo htmlentities( substr( $val, 0, 40 ) );
+	}
+
+	/**
+	 * Render the checkbox list for tables.
+	 */
+	public function render_tables_field() {
+		$master_blog_id = absint( $this->options['master_blog_id'] );
+		$all_tables     = $this->get_replicable_tables( $master_blog_id );
+
+		if ( empty( $all_tables ) ) {
+			esc_html_e( 'No custom database tables found.', 'yd-wpmu-sitewide-options' );
+			return;
+		}
+
+		echo '<div style="max-height: 400px; overflow-y: scroll; border: 1px solid #ccd0d4; padding: 10px; background: #fff;">';
+		foreach ( $all_tables as $table ) {
+			$table_name = esc_attr( $table );
+			$checked    = in_array( $table_name, $this->options['selected_tables'] ) ? 'checked' : '';
+			echo '<label style="display: block;"><input type="checkbox" name="yd_network_wide_options[selected_tables][]" value="' . $table_name . '" ' . $checked . '> ' . $table_name . '</label>';
+		}
 		echo '</div>';
-	} else {
-		echo 'not displayable';
 	}
-	echo '</td>';
-	echo "</tr>";
-}
 
-/** Update display options of the options admin page **/
-function yd_wpmuso_update_options(){
-	$options = get_option( 'widget_yd_wpmuso' );
-	$i = 0;
-	$to_update = Array(
-		'selected_options',
-		'disable_backlink',
-		'autospreading',
-		'auto_new_blog',
-		'over_write',
-		'flush_rewrites',
-		'master_blog_id',
-		'only_public', 
-    	'skip_archived', 
-    	'skip_mature',
-    	'skip_spam',
-    	'skip_deleted', 
-		'to_skip',
-		'overwrite_data'
-	);
-	yd_update_options_nostrip_array( 'widget_yd_wpmuso', 0, $to_update, $_POST, 'yd_wpmuso-' );
-	yd_wpmuso_set_action_hooks();
-	yd_wpmuso_replicate_options();
-}
-
-/** Add links on the plugin page (short description) **/
-add_filter( 'plugin_row_meta', 'yd_wpmuso_links' , 10, 2 );
-function yd_wpmuso_links( $links, $file ) {
-	$base = plugin_basename(__FILE__);
-	if ( $file == $base ) {
-		$links[] = '<a href="options-general.php?page=yd-network-wide-options%2F' . basename( __FILE__ ) . '">' . __('Settings') . '</a>';
-		$links[] = '<a href="http://www.yann.com/en/wp-plugins/yd-wpmu-sitewide-options">' . __('Support') . '</a>';
-	}
-	return $links;
-}
-
-function yd_wpmuso_action_links( $links ) {
-	$settings_link = '<a href="options-general.php?page=yd-network-wide-options%2F' . basename( __FILE__ ) . '">' . __('Settings') . '</a>';
-	array_unshift( $links, $settings_link );
-	return $links;
-}
-add_action( 'plugin_action_links_' . plugin_basename( __FILE__ ), 'yd_wpmuso_action_links', 10, 4 );
-
-function yd_wpmuso_linkware() {
-	$options = get_option( 'widget_yd_wpmuso' );
-	$i = 0;
-	if( $options[$i]['disable_backlink'] ) echo "<!--\n";
-	echo '<p style="text-align:center" class="yd_linkware"><small><a href="' 
-		. __( 'http://www.yann.com/en/wp-plugins/yd-wpmu-sitewide-options', 'yd-wpmuso' ) 
-		. '">' . __( 'Network-wide options by YD - Freelance Wordpress Developer', 'yd-wpmuso' )
-		. '</a></small></p>';
-	if( $options[$i]['disable_backlink'] ) echo "\n-->";
-}
-add_action('wp_footer', 'yd_wpmuso_linkware');
-
-// ============================ Plugin specific functions ============================
-
-function yd_wpmuso_get_tableslist() {
-	global $wpdb;
-	$options = get_option( 'widget_yd_wpmuso' );
-	$i = 0;
-	if( !isset( $options[$i]["master_blog_id"] ) ) $options[$i]["master_blog_id"] = 1;
-	$master_blog_id = $options[$i]["master_blog_id"];
-	switch_to_blog( $master_blog_id );
-	$query = "SHOW TABLES LIKE '$wpdb->prefix%'";
-	$tableslist = $wpdb->get_col( $query );
-	$shortlist = array();
-	foreach( $tableslist as $table ) {
-		if( preg_match( '/^' . $wpdb->prefix . '\d+_/', $table ) ) continue; //this is a sub-blog table
-		$post = preg_replace( '/^' . $wpdb->prefix . '/', '', $table );
-		if( $wpdb->$post and $wpdb->$post == $table ) continue; //this is a WP core table
-		$shortlist[] = $table;
-		//echo $table . '<br/>';
-	}
-	restore_current_blog();
-	return $shortlist;
-}
-
-function yd_wpmuso_get_optionslist() {
-	global $wpdb;
-	$options = get_option( 'widget_yd_wpmuso' );
-	$i = 0;
-	if( !isset( $options[$i]["master_blog_id"] ) ) $options[$i]["master_blog_id"] = 1;
-	$master_blog_id = $options[$i]["master_blog_id"];
-	switch_to_blog( $master_blog_id );
-	$query = "SELECT * FROM $wpdb->options WHERE NOT option_name LIKE '\\_%' ORDER BY option_name";
-	$optionslist = $wpdb->get_results( $query );
-	restore_current_blog();
-	return $optionslist;
-}
-
-function yd_wpmuso_set_action_hooks() {
-	$options = get_option( 'widget_yd_wpmuso' );
-	$i = 0;
-	if( $options[$i]["autospreading"] == 1 && is_array( $options[$i]["selected_options"] ) ) {
-		foreach( $options[$i]["selected_options"] as $opt ) {
-			if( preg_match( '/^ydtable_/', $opt ) ) {
-	    			
-    		} elseif( preg_match( '/^yddata_/', $opt ) ) {
-    			
-    		} else {
-				remove_action( 'update_option_' . $opt, 'yd_wpmuso_options_hook' );
-				add_action ( 'update_option_' . $opt, 'yd_wpmuso_options_hook' );
-    		}
-		}
-	} else {
-		global $wpdb;
-		$optionslist = yd_wpmuso_get_optionslist();
-		foreach ( (array) $optionslist as $option) {
-			$opt = esc_attr( $option->option_name );
-			remove_action( 'update_option_' . $opt, 'yd_wpmuso_options_hook' );
-		}
-	}
-}
-add_action( 'plugins_loaded', 'yd_wpmuso_set_action_hooks' );
-
-function yd_wpmuso_replicate_options() {
-	//echo 'replicating...<br/>';
-	$options = get_option( 'widget_yd_wpmuso' );
-	$i = 0;
-	if( !isset( $options[$i]["master_blog_id"] ) ) $options[$i]["master_blog_id"] = 1;
-	$master_blog_id = $options[$i]["master_blog_id"];
-	$order = '';
-	$limit = '';
-	$d = false;
-	if( $_POST['debug'] == 1 ) $d = true;
-    $blog_list = yd_get_blog_list();
-    $blog_count = count( $blog_list );
-    if($d) echo $blog_count . ' blogs to update.<br/>';
-	if( $blog_count > 1 ) {
-	    if( is_array( $options[$i]["selected_options"] ) ) {
-	    	if($d) $option_count = count( $options[$i]["selected_options"] );
-	    	if($d) echo $option_count . ' options to update.<br/>';
-	    	if($d) $total_ops = ( $blog_count * $option_count );
-	    	if($d) echo 'total: ' . $total_ops . ' operations to perform.<br/>';
-	    	if($d) echo 'max execution time: ' . ini_get('max_execution_time') . '<br/>';
-	    	if($d) echo 'max memory: ' . ini_get('memory_limit') . '<br/>';
-	    	if($d) echo 'memory usage: ' . memory_get_usage( FALSE ) . '<br/>';
-	    	if($d) echo 'memory usage (real): ' . memory_get_usage( TRUE ) . '<br/>';
-	    	wp_cache_flush();
-	    	if($d) echo 'cache flushed - memory usage: ' . memory_get_usage( FALSE ) . '<br/>';
-	    	if($d) echo 'memory usage (real): ' . memory_get_usage( TRUE ) . '<br/>';	    	
-	    	//if($d) set_time_limit ( 35 );
-	    	//if($d) echo 'new max execution time: ' . ini_get('max_execution_time') . '<br/>';
-	    	if($d) $count_op = 0;
-	    	if($d) $start_t = microtime();
-	    	foreach( $options[$i]["selected_options"] as $opt ) {
-	    		$value = get_blog_option( $master_blog_id, $opt );
-	    		if( preg_match( '/^ydtable_/', $opt ) ) {
-	    			if( $options[$i]['overwrite_data'] ) {
-	    				foreach( $blog_list as $blog ) {
-		    				if( $blog['blog_id'] == $master_blog_id ) continue;
-		    				yd_wpmuso_create_table( $opt, $blog['blog_id'], $master_blog_id );
-	    				}
-	    			}
-	    		} elseif( preg_match( '/^yddata_/', $opt ) ) {
-	    			if( $options[$i]['overwrite_data'] ) {
-	    				foreach( $blog_list as $blog ) {
-		    				if( $blog['blog_id'] == $master_blog_id ) continue;
-		    				yd_wpmuso_replicate_data( $opt, $blog['blog_id'], true, $master_blog_id );
-	    				}
-	    			}
-	    		} else {
-	    			$newoption[$opt] = $value;
-	    		}
-	    	}
-	    	//maybe looping through the blogs first is more efficient?!?!
-		    foreach( $blog_list as $blog ) {
-		    	if( $blog['blog_id'] == $master_blog_id ) continue;
-		    	wp_cache_flush();
-		    	//switch_to_blog( $blog['blog_id'] );
-	    		foreach( $newoption as $opt => $value ) {
-		    		if($d) $count_op ++;
-		    		if($d) echo 'updating op (' . $count_op . '/' . $total_ops . ') ' .
-		    			't: ' . ( microtime() - $start_t ) .
-		    			' blog: ' . $blog['blog_id'] . ' opt: ' . $opt . ' val: ' . $value . ' ';
-		    		if($d) echo 'mem: ' . floor( memory_get_usage( TRUE ) / 1024 / 1024 ) . ' ...';
-		    		if( $options[$i]['over_write'] || !get_blog_option( $blog['blog_id'], $opt )  )
-		    			update_blog_option( $blog['blog_id'], $opt, $value, FALSE );
-		    		//update_option( $opt, $value );
-		    		if($d) echo 'ok.<br/>';
-		    		if($d) {
-		    			$allowed = intval( ini_get('memory_limit') );
-		    			$used = floor( memory_get_usage( TRUE ) / 1024 / 1024 ); //  + 92
-		    			$left = $allowed - $used;
-		    			echo ' allowed: ' . $allowed . ' used: ' . $used . ' ';
-		    			if( $left < 5 ) {
-		    				$new = $allowed + 5;
-		    				echo 'memory is getting low... trying to allocate more... ';
-		    				ini_set( 'memory_limit', $new . 'M' );
-		    				echo $new . ' allocated ok.<br/>';
-		    			}
-		    		}
-		    		if($d) flush();
-		    	}
-		    }
-		    //restore_current_blog();
-		    if($d) echo 'End of updating operations.<br/>';
-		    if($d) flush();
-		}
-	}
-}
-
-function yd_wpmuso_options_new_blog_action( $blog_id ) {
-	if( $blog_id == 1 ) return;
-	$options = get_option( 'widget_yd_wpmuso' );
-	if( !$options ) $options = get_blog_option( 1, 'widget_yd_wpmuso' );
-	$i = 0;
-	if( !isset( $options[$i]["master_blog_id"] ) ) $options[$i]["master_blog_id"] = 1;
-	$master_blog_id = $options[$i]["master_blog_id"];
-	if( $blog_id == $master_blog_id ) return;
 	/**
-	 *debug
-	 **
-	echo "auto_new_blog: " . $options[$i]["auto_new_blog"] . '<br/>';
-	echo "selected_options: " . $options[$i]["selected_options"] . '<br/>';
-	echo "blog_id: " . $blog_id . '<br/>';
-	echo '<pre>';
-	var_dump( $options[$i]["selected_options"] );
-	echo '</pre>';
-	/**
-	exit(0);
-	**/
-	if( $options[$i]["auto_new_blog"] && is_array( $options[$i]["selected_options"] ) ) {
-		foreach( $options[$i]["selected_options"] as $opt ) {
-			if( preg_match( '/^ydtable_/', $opt ) ) {
-				yd_wpmuso_create_table( $opt, $blog_id, $master_blog_id );
-    		} elseif( preg_match( '/^yddata_/', $opt ) ) {
-				yd_wpmuso_replicate_data( $opt, $blog_id, true, $master_blog_id );
-    		} else {
-				//echo $opt . ': ';
-				$value = false;
-	    		//$value = get_option( $opt );
-	    		if( !$value ) $value = get_blog_option( $master_blog_id, $opt );
-	    		//echo $value . '<br/>';
-	    		$newoption[$opt] = $value;
-    		}
-    	}
-		foreach( $newoption as $opt => $value ) {
-			//echo $opt . ': ' . $value . '<br/>';
-     		update_blog_option( $blog_id, $opt, $value, FALSE );
-     	}
-	}
-	// Many thanks to Xpd (dpx@xpd.no) for feature and code suggestion
-	if( $options['flush_rewrites'] ) {
-		switch_to_blog( $blog_id ) ;
-		global $wp_rewrite;
-		$wp_rewrite->flush_rules();
-		restore_current_blog();
-	}
-	//exit(0);
-}
-add_action( 'wpmu_new_blog', 'yd_wpmuso_options_new_blog_action' );
+	 * Render a generic settings field (checkbox or text).
+	 *
+	 * @param array $args Field arguments.
+	 */
+	public function render_global_field( $args ) {
+		$id = $args['id'];
+		$value = $this->options[ $id ];
 
-function yd_wpmuso_create_table( $opt, $blog_id, $master_blog_id ) {
-	global $wpdb;
-	//echo $opt . '<br/>';
-	$table = preg_replace( '/^ydtable_/', '', $opt );
-    $query = "SHOW CREATE TABLE $table";
-    //echo $query . '<br/>';
-    $res = $wpdb->get_results( $query, ARRAY_A );
-    //var_dump($res);
-    $sql = $res[0]["Create Table"];
-    //echo $sql . '<br/><br/>';
-    // $wpdb->prefix must be caught in the context of the "master blog".
-    switch_to_blog( $master_blog_id );
-    $post = preg_replace( '/^' . $wpdb->prefix . '/i', '', $table );
-    restore_current_blog();
-    switch_to_blog( $blog_id );
-    $sql = preg_replace( '/' . $table . '/i', $wpdb->prefix . $post, $sql );
-    $sql = preg_replace( '/^CREATE TABLE/i', 'CREATE TABLE IF NOT EXISTS', $sql );
-    //echo $sql . '<br/><br/>';
-    $wpdb->query( $sql );
-    restore_current_blog();
-    //exit( 0 );
-}
-
-function yd_wpmuso_replicate_data( $opt, $blog_id, $delete = false, $master_blog_id ) {
-    global $wpdb;
-    $table = preg_replace( '/^yddata_/', '', $opt );
-    //$query = "SELECT * FROM $table";
-    //$res = $wpdb->get_results( $query, ARRAY_A );
-    // $wpdb->prefix must be caught in the context of the "master blog".
-    switch_to_blog( $master_blog_id );
-    $post = preg_replace( '/^' . $wpdb->prefix . '/i', '', $table );
-    restore_current_blog();
-    switch_to_blog( $blog_id );
-    if( $delete ) {
-    	$query = 'DELETE FROM ' . $wpdb->prefix . $post . " WHERE 1";
-    	$wpdb->query( $query );
-    }
-    $query = 'INSERT INTO ' . $wpdb->prefix . $post . " SELECT * FROM $table";
-    $wpdb->query( $query );
-    //echo $query;
-    restore_current_blog();
-    //exit( 0 );
-}
-
-function yd_wpmuso_options_hook( $value ) {
-	//echo 'options hook...<br/>';
-	$options = get_option( 'widget_yd_wpmuso' );
-	if( !$options ) $options = get_blog_option( 1, 'widget_yd_wpmuso' );
-	$i = 0;
-	if( !isset( $options[$i]["master_blog_id"] ) ) $options[$i]["master_blog_id"] = 1;
-	$master_blog_id = $options[$i]["master_blog_id"];
-	
-	if( version_compare( PHP_VERSION, '5.2.5', '>=' ) ) {
-		$bt = debug_backtrace( false );
-	} else {
-		$bt = debug_backtrace();
-	}
-	$caller = $bt[2]['args'][0];
-	$caller_file = $bt[3]['file'];
-	if( preg_match( '/wpmu-functions.php$/', $caller_file ) ) return $value;
-	/**
-	echo 'caller: ' . $caller . '<br/>';
-	echo '<pre>';
-	//echo "BT:\n";
-	//var_dump( $bt );
-	echo "CALLER:\n";
-	var_dump( $caller );
-	echo "CALLER_FILE:\n";
-	var_dump( $caller_file );
-	echo "CURRENT SITE:\n";
-	var_dump( get_current_site() );
-	echo '</pre>';
-	**/
-	if( is_string( $caller ) ) {
-		$opt = preg_replace( '/^update_option_/', '', $caller );
-		$blog_list = yd_get_blog_list();
-		if( $ct = count( $blog_list ) > 1 ) {
-			set_time_limit ( $ct * 3 );
-			wp_cache_flush();
-			$value = get_blog_option( $master_blog_id, $opt );
-			/**/
-			foreach( $blog_list as $blog ) {
-				if( $blog['blog_id'] == $master_blog_id ) continue;
-				//switch_to_blog( $blog['blog_id'] );
-				//update_option( $opt, $value );
-	    		update_blog_option( $blog['blog_id'], $opt, $value, FALSE );
-	    		//wp_cache_flush();
-	    		if( $d ) {
-	    			echo '<br/>Caller: <b>' . $caller . '</b>';
-	    			echo '<br/>' . $blog['blog_id'] . ' - ';
-	    			$allowed = intval( ini_get('memory_limit') );
-	    			$used = floor( memory_get_usage( TRUE ) / 1024 / 1024 ); //  + 92
-	    			$left = $allowed - $used;
-	    			echo ' allowed: ' . $allowed . ' used: ' . $used . ' ';
-	    			if( $left < 5 ) {
-	    				$new = $allowed + 5;
-	    				echo 'memory is getting low... trying to allocate more... ';
-	    				ini_set( 'memory_limit', $new . 'M' );
-	    				echo $new . ' allocated ok.<br/>';
-	    			}
-	    			flush();
-	    		}
+		if ( in_array( $id, [ 'master_blog_id', 'to_skip' ] ) ) {
+			// Text field
+			echo '<input type="text" name="yd_network_wide_options[' . esc_attr( $id ) . ']" value="' . esc_attr( $value ) . '" class="regular-text">';
+			if ( $id === 'to_skip' ) {
+				echo '<p class="description">' . esc_html__( 'Comma-separated list of site IDs to exclude.', 'yd-wpmu-sitewide-options' ) . '</p>';
 			}
-			/**/
-	    	//restore_current_blog();
-		}
-	}
-	return $value;
-}
-
-function yd_get_blog_list() {
-	global $wpdb;
-	$options = get_option( 'widget_yd_wpmuso' );
-	if( !$options ) $options = get_blog_option( 1, 'widget_yd_wpmuso' );
-	$i = 0;
-	$query = "
-			SELECT 
-				blog_id, 
-				domain, 
-				last_updated 
-    		FROM 
-    			$wpdb->blogs
-	";
-    if( 
-    	$options[$i]['only_public']		||
-    	$options[$i]['skip_archived']	|| 
-    	$options[$i]['skip_mature']		|| 
-    	$options[$i]['skip_spam']		|| 
-    	$options[$i]['skip_deleted']	|| 
-		$options[$i]['to_skip']	!= ''
-	) {
-		$query .= " WHERE 1 ";
-		if( $options[$i]['only_public'] ) 	$query .= " AND public='1' ";
-		if( $options[$i]['skip_archived'] )	$query .= " AND archived='0' ";
-		if( $options[$i]['skip_mature'] ) 	$query .= " AND mature='0' ";
-		if( $options[$i]['skip_spam'] ) 	$query .= " AND spam='0' ";
-		if( $options[$i]['skip_deleted'] )	$query .= " AND deleted='0' ";
-		if( $options[$i]['to_skip']	!= '' && preg_match( '/^(\d+,?\s*)+$/', $options[$i]['to_skip'] ) ) {
-			$query .= ' AND blog_id NOT IN (' . $options[$i]['to_skip'] . ')';
-		}
-	}
-	//echo $query;
-	return $wpdb->get_results( $query, ARRAY_A );
-    /**
-     * used to be a WHERE clause:
-     *  . " 
-     		WHERE public = '1' 
-    			AND blog_id!='1' 
-    			AND archived = '0' 
-    			AND mature = '0' 
-    			AND spam = '0' 
-    			AND deleted ='0' 	" . $order . " 
-    								" . $limit . ""
-     */
-}
-
-// ============================ Generic YD WP functions ==============================
-
-include( 'yd-wp-lib.inc.php' );
-
-if( !function_exists( 'yd_update_options_nostrip_array' ) ) {
-	function yd_update_options_nostrip_array( $option_key, $number, $to_update, $fields, $prefix ) {
-		$options = $newoptions = get_option( $option_key );
-		/*echo '<pre>';
-		echo 'fields: ';
-		var_dump( $fields );*/
-		foreach( $to_update as $key ) {
-			// reset the value
-			if( is_array( $newoptions[$number][$key] ) ) {
-				$newoptions[$number][$key] = array();
-			} else {
-				$newoptions[$number][$key] = '';
-			}
-			/*echo $key . ': ';
-			var_dump( $fields[$prefix . $key . '-' . $number] );*/
-			if( !is_array( $fields[$prefix . $key . '-' . $number] ) ) {
-				$value = html_entity_decode( stripslashes( $fields[$prefix . $key . '-' . $number] ) );
-				$newoptions[$number][$key] = $value;
-			} else {
-				//it's a multi-valued field, make an array...
-				if( !is_array( $newoptions[$number][$key] ) )
-					$newoptions[$number][$key] = array( $newoptions[$number][$key] );
-				foreach( $fields[$prefix . $key . '-' . $number] as $v )
-					$newoptions[$number][$key][] = html_entity_decode( stripslashes( $v ) );	
-			}
-			//echo $key . " = " . $prefix . $key . '-' . $number . " = " . $newoptions[$number][$key] . "<br/>";
-		}
-		//echo '</pre>';
-		if ( $options != $newoptions ) {
-			$options = $newoptions;
-			update_option( $option_key, $options );
-			return TRUE;
 		} else {
-			return FALSE;
+			// Checkbox
+			echo '<label><input type="checkbox" name="yd_network_wide_options[' . esc_attr( $id ) . ']" value="1" ' . checked( 1, $value, false ) . '></label>';
 		}
+	}
+
+	/**
+	 * Sanitize and validate options.
+	 *
+	 * @param array $input The input from the settings form.
+	 * @return array The sanitized options.
+	 */
+	public function sanitize_options( $input ) {
+		$new_input = $this->get_default_options();
+
+		if ( isset( $input['master_blog_id'] ) ) {
+			$new_input['master_blog_id'] = absint( $input['master_blog_id'] );
+		}
+		if ( isset( $input['to_skip'] ) ) {
+			$new_input['to_skip'] = sanitize_text_field( $input['to_skip'] );
+		}
+
+		// Checkboxes
+		$checkboxes = [
+			'autospreading', 'auto_new_blog', 'overwrite_options', 'replicate_data',
+			'overwrite_data', 'flush_rewrites', 'only_public', 'skip_archived',
+			'skip_mature', 'skip_spam', 'skip_deleted', 'disable_backlink',
+		];
+		foreach ( $checkboxes as $cb ) {
+			$new_input[ $cb ] = isset( $input[ $cb ] ) ? 1 : 0;
+		}
+
+		// Array of strings (options and tables)
+		if ( ! empty( $input['selected_options'] ) && is_array( $input['selected_options'] ) ) {
+			$new_input['selected_options'] = array_map( 'sanitize_text_field', $input['selected_options'] );
+		}
+		if ( ! empty( $input['selected_tables'] ) && is_array( $input['selected_tables'] ) ) {
+			$new_input['selected_tables'] = array_map( 'sanitize_text_field', $input['selected_tables'] );
+		}
+		
+		// After sanitizing, trigger the replication
+		$this->replicate_all_settings( $new_input );
+
+		return $new_input;
+	}
+
+	/**
+	 * Get list of options from the master site.
+	 *
+	 * @param int $master_blog_id The ID of the master site.
+	 * @return array
+	 */
+	private function get_replicable_options( $master_blog_id ) {
+		global $wpdb;
+		switch_to_blog( $master_blog_id );
+		$query       = "SELECT option_name, option_value FROM $wpdb->options WHERE NOT option_name LIKE %s ORDER BY option_name";
+		$optionslist = $wpdb->get_results( $wpdb->prepare( $query, '\_%' ) );
+		restore_current_blog();
+		return $optionslist;
+	}
+
+	/**
+	 * Get list of custom tables from the master site.
+	 *
+	 * @param int $master_blog_id The ID of the master site.
+	 * @return array
+	 */
+	private function get_replicable_tables( $master_blog_id ) {
+		global $wpdb;
+		switch_to_blog( $master_blog_id );
+		$query       = "SHOW TABLES LIKE %s";
+		$all_tables  = $wpdb->get_col( $wpdb->prepare( $query, $wpdb->prefix . '%' ) );
+		$core_tables = [
+			$wpdb->prefix . 'commentmeta',
+			$wpdb->prefix . 'comments',
+			$wpdb->prefix . 'links',
+			$wpdb->prefix . 'options',
+			$wpdb->prefix . 'postmeta',
+			$wpdb->prefix . 'posts',
+			$wpdb->prefix . 'term_relationships',
+			$wpdb->prefix . 'term_taxonomy',
+			$wpdb->prefix . 'termmeta',
+			$wpdb->prefix . 'terms',
+		];
+		
+		// Also filter out global tables
+		$core_tables[] = $wpdb->blogs;
+		$core_tables[] = $wpdb->blog_versions;
+		$core_tables[] = $wpdb->registration_log;
+		$core_tables[] = $wpdb->signups;
+		$core_tables[] = $wpdb->site;
+		$core_tables[] = $wpdb->sitemeta;
+		$core_tables[] = $wpdb->users;
+		$core_tables[] = $wpdb->usermeta;
+
+		$custom_tables = array_diff( $all_tables, $core_tables );
+		restore_current_blog();
+		return $custom_tables;
+	}
+	
+	/**
+	 * Get a filtered list of sites to replicate to.
+	 *
+	 * @param array $options Plugin options.
+	 * @return array
+	 */
+	private function get_target_sites( $options ) {
+		$args = [
+			'number' => 0, // Get all sites
+		];
+		if ( ! empty( $options['only_public'] ) ) {
+			$args['public'] = 1;
+		}
+		if ( ! empty( $options['skip_archived'] ) ) {
+			$args['archived'] = 0;
+		}
+		if ( ! empty( $options['skip_mature'] ) ) {
+			$args['mature'] = 0;
+		}
+		if ( ! empty( $options['skip_spam'] ) ) {
+			$args['spam'] = 0;
+		}
+		if ( ! empty( $options['skip_deleted'] ) ) {
+			$args['deleted'] = 0;
+		}
+		if ( ! empty( $options['to_skip'] ) ) {
+			$excluded_ids = array_map( 'absint', explode( ',', $options['to_skip'] ) );
+			$args['site__not_in'] = $excluded_ids;
+		}
+		
+		return get_sites( $args );
+	}
+
+	/**
+	 * Replicate all selected settings to all target sites.
+	 *
+	 * @param array $options The plugin settings.
+	 */
+	private function replicate_all_settings( $options ) {
+		$master_blog_id = absint( $options['master_blog_id'] );
+		$sites          = $this->get_target_sites( $options );
+
+		if ( empty( $sites ) ) {
+			return;
+		}
+
+		// Replicate options
+		if ( ! empty( $options['selected_options'] ) ) {
+			foreach ( $options['selected_options'] as $option_name ) {
+				$value = get_blog_option( $master_blog_id, $option_name );
+				foreach ( $sites as $site ) {
+					$site_id = $site->blog_id;
+					if ( $site_id == $master_blog_id ) {
+						continue;
+					}
+					if ( $options['overwrite_options'] || false === get_blog_option( $site_id, $option_name, false ) ) {
+						update_blog_option( $site_id, $option_name, $value );
+					}
+				}
+			}
+		}
+
+		// Replicate tables
+		if ( ! empty( $options['selected_tables'] ) ) {
+			foreach ( $options['selected_tables'] as $table_name ) {
+				foreach ( $sites as $site ) {
+					$site_id = $site->blog_id;
+					if ( $site_id == $master_blog_id ) {
+						continue;
+					}
+					$this->replicate_table_structure( $table_name, $site_id, $master_blog_id );
+					if ( ! empty( $options['replicate_data'] ) ) {
+						$this->replicate_table_data( $table_name, $site_id, $master_blog_id, ! empty( $options['overwrite_data'] ) );
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Replicate a single table's structure.
+	 *
+	 * @param string $master_table_name Full table name from master site.
+	 * @param int    $target_site_id    The ID of the site to replicate to.
+	 * @param int    $master_site_id    The ID of the master site.
+	 */
+	private function replicate_table_structure( $master_table_name, $target_site_id, $master_site_id ) {
+		global $wpdb;
+
+		// Get master table structure
+		$master_create_sql_row = $wpdb->get_row( "SHOW CREATE TABLE `{$master_table_name}`", ARRAY_A );
+		if ( ! $master_create_sql_row || empty( $master_create_sql_row['Create Table'] ) ) {
+			return;
+		}
+		$master_create_sql = $master_create_sql_row['Create Table'];
+
+		// Get prefixes
+		$master_prefix = $wpdb->get_blog_prefix( $master_site_id );
+		$target_prefix = $wpdb->get_blog_prefix( $target_site_id );
+
+		// Determine the non-prefixed part of the table name
+		$base_table_name = preg_replace( "/^{$master_prefix}/", '', $master_table_name );
+		$target_table_name = $target_prefix . $base_table_name;
+
+		// Create the new SQL
+		$target_create_sql = preg_replace( "/`{$master_table_name}`/", "`{$target_table_name}`", $master_create_sql, 1 );
+		$target_create_sql = str_replace( 'CREATE TABLE', 'CREATE TABLE IF NOT EXISTS', $target_create_sql );
+
+		$wpdb->query( $target_create_sql );
+	}
+
+	/**
+	 * Replicate a single table's data.
+	 *
+	 * @param string $master_table_name Full table name from master site.
+	 * @param int    $target_site_id    The ID of the site to replicate to.
+	 * @param int    $master_site_id    The ID of the master site.
+	 * @param bool   $overwrite         Whether to delete existing data.
+	 */
+	private function replicate_table_data( $master_table_name, $target_site_id, $master_site_id, $overwrite ) {
+		global $wpdb;
+
+		$master_prefix = $wpdb->get_blog_prefix( $master_site_id );
+		$target_prefix = $wpdb->get_blog_prefix( $target_site_id );
+
+		$base_table_name   = preg_replace( "/^{$master_prefix}/", '', $master_table_name );
+		$target_table_name = $target_prefix . $base_table_name;
+		
+		// Check if target table exists
+		if($wpdb->get_var("SHOW TABLES LIKE '{$target_table_name}'") != $target_table_name) {
+			return; // Don't proceed if target table doesn't exist.
+		}
+
+		if ( $overwrite ) {
+			$wpdb->query( "TRUNCATE TABLE `{$target_table_name}`" );
+		}
+
+		$master_data = $wpdb->get_results( "SELECT * FROM `{$master_table_name}`", ARRAY_A );
+
+		if ( ! empty( $master_data ) ) {
+			$columns = array_keys( $master_data[0] );
+			$column_list = '`' . implode( '`, `', $columns ) . '`';
+			
+			$values_list = [];
+			$placeholders = [];
+			
+			foreach($master_data as $row) {
+				$row_placeholders = [];
+				foreach($row as $value) {
+					$values_list[] = $value;
+					$row_placeholders[] = '%s';
+				}
+				$placeholders[] = '(' . implode(',', $row_placeholders) . ')';
+			}
+			
+			$query = "INSERT INTO `{$target_table_name}` ({$column_list}) VALUES " . implode(', ', $placeholders);
+			$wpdb->query( $wpdb->prepare($query, $values_list) );
+		}
+	}
+
+	/**
+	 * Action fired when a new blog is created.
+	 *
+	 * @param int $blog_id The ID of the newly created site.
+	 */
+	public function on_new_blog_creation( $blog_id ) {
+		if ( empty( $this->options['auto_new_blog'] ) ) {
+			return;
+		}
+
+		$master_blog_id = absint( $this->options['master_blog_id'] );
+		if ( $blog_id == $master_blog_id ) {
+			return;
+		}
+		
+		// Replicate options
+		if ( ! empty( $this->options['selected_options'] ) ) {
+			foreach ( $this->options['selected_options'] as $option_name ) {
+				$value = get_blog_option( $master_blog_id, $option_name );
+				update_blog_option( $blog_id, $option_name, $value );
+			}
+		}
+
+		// Replicate tables
+		if ( ! empty( $this->options['selected_tables'] ) ) {
+			foreach ( $this->options['selected_tables'] as $table_name ) {
+				$this->replicate_table_structure( $table_name, $blog_id, $master_blog_id );
+				if ( ! empty( $this->options['replicate_data'] ) ) {
+					// Always overwrite for new blogs
+					$this->replicate_table_data( $table_name, $blog_id, $master_blog_id, true );
+				}
+			}
+		}
+
+		// Flush rewrite rules
+		if ( ! empty( $this->options['flush_rewrites'] ) ) {
+			switch_to_blog( $blog_id );
+			flush_rewrite_rules();
+			restore_current_blog();
+		}
+	}
+
+	/**
+	 * Add hooks to watch for updates on selected options.
+	 */
+	public function add_option_update_hooks() {
+		if ( empty( $this->options['autospreading'] ) || empty( $this->options['selected_options'] ) ) {
+			return;
+		}
+
+		foreach ( $this->options['selected_options'] as $option_name ) {
+			add_action( "update_option_{$option_name}", [ $this, 'on_tracked_option_update' ], 10, 3 );
+		}
+	}
+
+	/**
+	 * Action fired when a tracked option is updated on the master site.
+	 *
+	 * @param mixed  $old_value The old option value.
+	 * @param mixed  $new_value The new option value.
+	 * @param string $option_name The name of the option.
+	 */
+	public function on_tracked_option_update( $old_value, $new_value, $option_name ) {
+		global $wpdb;
+		// This hook fires for all sites. We only care if it's the master site.
+		if ( get_current_blog_id() != absint( $this->options['master_blog_id'] ) ) {
+			return;
+		}
+
+		$sites = $this->get_target_sites( $this->options );
+		if ( empty( $sites ) ) {
+			return;
+		}
+
+		foreach ( $sites as $site ) {
+			$site_id = $site->blog_id;
+			if ( $site_id == get_current_blog_id() ) {
+				continue;
+			}
+			update_blog_option( $site_id, $option_name, $new_value );
+		}
+	}
+
+	/**
+	 * Display a link in the footer, if not disabled.
+	 */
+	public function display_footer_link() {
+		if ( ! empty( $this->options['disable_backlink'] ) ) {
+			return;
+		}
+		echo '<p style="text-align:center" class="yd_linkware"><small><a href="'
+			. esc_url( __( 'http://www.yann.com/en/wp-plugins/yd-wpmu-sitewide-options', 'yd-wpmu-sitewide-options' ) )
+			. '">' . esc_html__( 'Network-wide options by YD - Freelance Wordpress Developer', 'yd-wpmu-sitewide-options' )
+			. '</a></small></p>';
+	}
+	
+	/**
+	 * Add links to the plugin's row in the plugin list table.
+	 *
+	 * @param array  $links The existing links.
+	 * @param string $file The plugin file.
+	 * @return array
+	 */
+	public function plugin_row_meta( $links, $file ) {
+		if ( plugin_basename( YD_NWO_PLUGIN_FILE ) === $file ) {
+			$settings_link = '<a href="' . network_admin_url( 'settings.php?page=yd-network-wide-options' ) . '">' . __( 'Settings', 'yd-wpmu-sitewide-options' ) . '</a>';
+			$support_link  = '<a href="http://www.yann.com/en/wp-plugins/yd-wpmu-sitewide-options" target="_blank">' . __( 'Support', 'yd-wpmu-sitewide-options' ) . '</a>';
+			array_unshift( $links, $settings_link, $support_link );
+		}
+		return $links;
 	}
 }
 
-?>
+/**
+ * Begins execution of the plugin.
+ *
+ * Since everything within the plugin is registered via hooks,
+ * then kicking off the plugin from this point in the file does
+ * not affect the page life cycle.
+ *
+ * @since    1.0.0
+ */
+function yd_nwo_run() {
+	return YD_Network_Wide_Options::instance();
+}
+yd_nwo_run();
+
